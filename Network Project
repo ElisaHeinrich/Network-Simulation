@@ -1,0 +1,596 @@
+
+
+
+# *In this assignment, we explore the interaction between people's preferences or opinions and the strength of their social connections. The basic idea is that social dynamics are driven by two factors:*
+# 
+# *- People prefer forming social relationships with other who share their preferences, opinions or interests.* 
+# 
+# 
+# *- People's preferences, opinions or interests tend to become similar to those of other people in their social circle.* 
+# 
+# *We model these two processes on a small- world network to see how both opinions and relationships change over time.*
+# 
+# 
+# ## Part 0: The basic model
+# 
+# We represent each person as a node in a network with an opinion attribute associated with it. The opinion attribute can take on values between 0 and 1. People with similar values for their opinion are in agreement on the topic and people with very different values disagree strongly. 
+# 
+# We represent the existence of a social relationship between two people as an edge between two nodes in the network and assign a weight to each edge, with values ranging from 0 to 1. A weight close to 0 means that the relationship between two people is weak and that those two people's opinions do not influence each other much. A weight close to 1 means that two people have a very strong relationship and will tend to adjust their opinions to be closer to each other. 
+
+
+from matplotlib import pyplot as plt
+import networkx as nx
+import numpy as np
+import random
+import itertools
+import scipy
+from matplotlib import pyplot
+
+class SocialDynamicsSimulation:
+    '''
+    Simulate social dynamics by strengthening opinions and connection weights
+    based on random interactions between nodes.
+    '''
+
+    def __init__(self, network_size=50, alpha=0.03, beta=0.3, gamma=4):
+        
+        '''
+        Inputs:
+
+            network_size (int) The number of nodes in the random Watts-Strogatz
+              small-world network. Default: 50.
+
+            alpha (float) The rate at which nodes adjust their opinions to
+              match neighboring nodes' opinions during interactions.
+              Default: 0.03.
+
+            beta (float) The rate at which edge weights are changed in
+              response to differing opinions. Default: 0.3.
+
+            gamma (float) The pickiness of nodes. Nodes with opinions differing
+              by more than 1/gamma will result in an edge weight decreasing.
+              Default: 4.
+        '''
+        
+        self.network_size = network_size
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+        
+    def initialize(self):
+        '''
+        Initialize the simulation with a random graph, with random 0 or 1
+        opinions assigned to all nodes and initial edge weights of 0.5.
+        '''
+        self.graph = nx.watts_strogatz_graph(50, 5, 0.5)
+        
+        for edge in self.graph.edges:
+            self.graph.edges[edge]['weight'] = 0.5
+        for node in self.graph.nodes:
+            self.graph.nodes[node]['opinion'] = random.randint(0, 1)
+            
+        self.layout = nx.spring_layout(self.graph)  # Initial visual layout
+        self.step = 0
+
+    def observe(self):
+        '''
+        Draw the state of the network.
+        '''
+        self.layout = nx.spring_layout(self.graph, pos = self.layout, iterations=5)
+        plt.clf()
+        nx.draw(
+            self.graph, pos=self.layout, with_labels=True,
+            node_color=[self.graph.nodes[i]['opinion'] for i in self.graph.nodes],
+            edge_color=[self.graph.edges[i, j]['weight'] for i, j in self.graph.edges],
+            edge_cmap=plt.cm.binary, edge_vmin=0, edge_vmax=1,
+            alpha=0.7, vmin=0, vmax=1)
+        plt.title('Step: ' + str(self.step))
+
+    def update(self):
+        
+        if random.uniform(0, 1) < 0.01:
+            # Create a new edge with weight 0.5 between two unconnected nodes
+            nodes = list(self.graph.nodes)
+            while True:
+                new_edge = random.sample(nodes, 2)
+                if new_edge not in self.graph.edges:
+                    break
+            self.graph.add_edge(new_edge[0], new_edge[1], weight=0.5)
+            
+            
+        else:
+            # Select a random edge and update node opinions and edge weight
+            edge = random.choice(list(self.graph.edges))
+            weight = self.graph.edges[edge]['weight']
+            opinions = [self.graph.nodes[n]['opinion'] for n in edge]
+            for i in [0, 1]:
+                self.graph.nodes[edge[i]]['opinion'] = (
+                    opinions[i] + self.alpha * weight * (opinions[1-i] - opinions[i]))
+            self.graph.edges[edge]['weight'] = (
+                weight +
+                self.beta * weight * (1-weight) *
+                (1 - self.gamma * abs(opinions[0] - opinions[1])))
+            # Remove very weak connections
+            if self.graph.edges[edge]['weight'] < 0.05:
+                self.graph.remove_edge(*edge)
+        self.step += 1
+
+
+# **Update rules**
+# 
+# This network dynamics have 3 parts.
+# 
+# 1. People change their opinions to more closely match those of people they have strong relationship with.  We model this by selecting a random edge from the network and letting them interact. W update the opinion of each person to move a bit closer together. The stronger their relationship, the more they will move their opinions closer to each other.  
+# 
+#     The change in opinion of Person i when talking to Person j is Δo_i= α w_ij (o_j - o_i)
+# 
+#     Person j's opinion also changes, but in the opposite direction to Person i's, thus bringing their opinions closer together. In the equation above α ∈ (0, 0.5] is a parameter of the model. The larger α is to 0, the more stubborn (less likely to change their opinions) people are. 
+# 
+# 
+#  2. People strengthen or weaken their relationships depending on whether they agree or disagree, respectively. During the same interaction as in Step 1, the weight of the edge connecting nodes i and j is also changed. The change in weight is
+#  
+#  Δw_ij = β w_ij (1- w_ij)(1- γ|o_i -o_j|)
+#  
+#  Here β ∈ (0, 1) and γ>0 are paremeters of the model. If γ ≤ 1 then all weights will converge to 1 over time since differing opinions do not matter enough to decrease edge weights. If γ >1, the weight between the nodes will decrease if the opinions of the nodes are different enough - if |o_i - o_j| > 1/γ.
+#  
+#  
+# As a final step when updating weights, we remove an edge from the network if its weight drops below 0.05. This step models a social relationship that has broken down.
+# 
+# 
+# 3. Finally, we model new social connections between random people who are not yet connected. This is relatively rare occurrence, so we do Steps 1 and 2 above 99% of the time and this step only !% of the time. Think this process as randomly meeting someone new and forming a frienship with them. The edge weight is initally set to 0.5 in these cases. Over time the weight will increase towards 1 or decrease towards 0 depending on whether the two people have similar or differing opinions, using Steps 1 and 2.
+
+sim = SocialDynamicsSimulation(gamma=2)
+sim.initialize()
+plt.figure()
+sim.observe()
+for i in range(10):
+    for i in range(2000):
+        sim.update()
+    plt.figure()
+    sim.observe()
+
+sim = SocialDynamicsSimulation(gamma=6)
+sim.initialize()
+plt.figure()
+sim.observe()
+for i in range(10):
+    for i in range(2000):
+        sim.update()
+    plt.figure()
+    sim.observe()
+
+
+# As we mentioned, if γ ≤1, then all edge weights will eventually converge to a value of 1. However, if γ is greater than 1 but takes low values around one, the population tends to create a big cluster with uniform opinion. As we can imagine with higher values, specially greater than the upper bond 1+1/β, the model will split into two main clusters, with few or none remaining ties between them.   
+
+
+alpha = 0.03
+beta = 0.3
+gamma = 4
+
+cmap = pyplot.cm.viridis  
+
+# Plot traces of how opinion and weight change over time
+for opinion, weight in [
+    [0.25, 0.95], [0.45, 0.95], [0.55, 0.95], [0.65, 0.95], [0.75, 0.95],
+    [0.85, 0.95], [0.95, 0.95], [0.35, 0.65], [0.45, 0.75], [0.95, 0.75],
+    [0.95, 0.35], [0.3, 0.25], [0.3, 0.15], [0.15, 0.06], [0.05, 0.06]
+]:
+    ow = [[opinion, 0.0, weight]]
+    for i in range(100):
+        delta_o = alpha * ow[-1][2] * (ow[-1][1] - ow[-1][0])
+        delta_w = (
+            beta * ow[-1][2] * (1-ow[-1][2]) *
+            (1-gamma*abs(ow[-1][1] - ow[-1][0])))
+        new_weight = ow[-1][2] + delta_w
+        if new_weight < 0.05:
+            new_weight = 0
+        ow.append([ow[-1][0] + delta_o, ow[-1][1] - delta_o, new_weight])
+    pyplot.plot(
+        [row[0] - row[1] for row in ow],
+        [row[2] for row in ow],
+        color=(cmap(0.15) if ow[-1][2] == 0 else cmap(0.75)),
+        alpha=0.75)
+
+# Plot vector field
+opinion = scipy.linspace(0, 1, 11)  # the difference in opinion, |o_i - o_j|
+weight = scipy.linspace(0, 1, 11)   # the edge weight, w_ij
+ow_grid = scipy.meshgrid(opinion, weight)
+delta_o_grid = -2*alpha * ow_grid[1] * ow_grid[0]
+delta_w_grid = beta * ow_grid[1] * (1-ow_grid[1]) * (1 - gamma * ow_grid[0])
+pyplot.quiver(ow_grid[0], ow_grid[1], delta_o_grid, delta_w_grid)
+
+# Annotate plot
+pyplot.xlabel('Opinion Difference')
+pyplot.ylabel('Weight')
+pyplot.plot([0, 1], [0.05, 0.05], 'k--')
+pyplot.axis('Square')
+pyplot.show()
+
+
+# This vector fields show how the edge weight and difference in opinion values change in a single 2- person interaction for all values in the mentioned constraints. Each arrow in the plot above shows in which direction and by how much the weight of an edge and the difference in opinions between two nodes would change according to the rules of the social dynamics model. 
+# 
+# The lines on the plot trace out the evolution over time of the weight and opinion difference values from a few different starting points. Purple lines result in an edge disappearing because of the threshold, while green lines result in an edge with a weight of 1. 
+
+# ## Part 1: Propose 2 modifications
+# 
+# **- Multiple topics:** In reality, each person has an opinion on multiple topics, so rather than having a single value between 0 and 1 for each opinion, have a vector (array) of values where each entry in the vector represents a person's opinion on one topic. Modify the rules of the model so that people have a conversation about a particular topic (selected randomly) and update their opinions and relationship strength based on that conversation. In this case we will allow two interacting nodes to update their opinions separatedly depending on the topic, but keeping the parameter α constant for each topic. When updating the bond weight we use the mean difference in opinion, by assuming that all topics are equally important.
+# 
+# The opinion update then will be the same, except now that the opinions and the difference are now an array of values rather than single scalars. 
+# 
+# The weigth update now Δw_ij = β w_ij (1- w_ij)(1- γ 1/t Σ|o_it -o_jt|) since now is the mean difference in opinion.
+# 
+# Some variations of this proposal is chooseing topics with the least disagreement, rather than processing all opinions. In addition, we can improve the behavior by adding a weight of importance to each topic.
+# 
+# 
+# 
+# **- Personalized flexibility:** We can consider different ways in which the node updates its opinions on each topic. For example, we should consider that node with more extreme opinions might be harder to convince than individuals with in the gray zone (around 0.5). In order to simulate this behavior, we can adjust the opinions based on Δo to consider how extreme certain opinion is. We can define the extremeness as the min(o_i, abs(o_i-1)) of how close a certain opinion is from an extreme. From this value, we can slightly update the most extreme opinion from 0.05, rather than becoming stationary. We can use a new parameter δ to update through this: o_i = Δo_ij*δ* max(0.05, min(o_i, abs(o_i-1))). We should consider δ in the range of positive non-zero values, around 3, to maintain similar magnitudes of updates on average.
+# 
+# 
+
+# ## Part 2: Implementation
+# **Random small-world networks - Barabasi Albert simulation**
+# 
+# This proposal generates networks with properties similar to real small-world social network. We start with a small network with any structure, keep adding new nodes where each new node is connected to m (a parameter or this procedure) existing nodes. Nodes that already have many neighbors are more likely to get attached to than nodes that have few neighbors. The probability of attaching to a particular node is proportional to the degree of the node. Therefore, we will identify few nodes high relatively higher degrees since the preferential attachment mechanism. We know also that the degree distribution follows a power law distribution with the form P(k)=k^-3, as demonstrated in class. We choose a size of 50 nodes to allow for a visual analysis. 
+
+# In[27]:
+
+
+import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
+get_ipython().run_line_magic('matplotlib', 'inline')
+import networkx as nx
+import scipy
+import random as rd
+import numpy as np
+import seaborn as sns
+
+
+# In[28]:
+
+
+class NetworkSimulationExtension:
+    '''
+    Simulate social dynamics by strengthening opinions and connection weights
+    based on random interactions between nodes.
+    '''
+
+    def __init__(self, n_size=50, m_nodes=2, alpha=0.03, beta=0.3, gamma=4, delta= None, n_topics=2):
+        
+        '''
+        Inputs:
+        
+            n_size (int) The number of nodes in the random Watts-Strogatz
+              small-world network. Default: 1.
+              
+            m_nodes (int) Number of edges to attach from a new node to 
+              to existing nodes. Default: 2. 
+
+            alpha (float) The rate at which nodes adjust their opinions to
+              match neighboring nodes' opinions during interactions.
+              Default: 0.03.
+
+            beta (float) The rate at which edge weights are changed in
+              response to differing opinions. Default: 0.3.
+
+            gamma (float) The pickiness of nodes. Nodes with opinions differing
+              by more than 1/gamma will result in an edge weight decreasing.
+              Default: 4.
+              
+            delta (float) The flexibility of the nodes. 
+              Default: None (if linear).
+            
+            n_topics (int) Number of topics per node. 
+              Default: 2.
+            
+            
+        '''
+        self.n_size = n_size
+        self.m_nodes = m_nodes
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+        self.delta = delta
+        self.n_topics = n_topics
+        
+    def initialize(self):
+        
+        '''
+        
+        Initialize the simulation with a random graph, with random 0 or 1
+        opinions assigned to all nodes and initial edge weights of 0.5. 
+        
+        '''
+        #setting a barabasi-albert
+        self.graph = nx.barabasi_albert_graph(self.n_size, self.m_nodes)
+        
+        #sample edge weights from normal distribution
+        for edge in self.graph.edges:
+            self.graph.edges[edge]['weight'] = scipy.random.normal(.5, .2)
+        
+        #initiate opinions as arrays
+        for node in self.graph.nodes:
+            self.graph.nodes[node]['opinions'] = np.array([rd.choice([0.0, 1.0]) for n in range(self.n_topics)], dtype= np.float64)
+            
+        self.layout = nx.spring_layout(self.graph)  # Initial visual layout
+        self.step = 0
+
+    def observe(self):
+        
+        '''
+        Draw the state of the network.
+        '''
+        self.layout = nx.spring_layout(self.graph, pos = self.layout)
+        plt.clf()
+        
+        labels, size= None, None
+        
+        #topic 2
+        if self.n_topics >1:
+            size= [(self.graph.nodes[i]['opinions'][1]+0.25)*450 for i in self.graph.nodes]
+        
+        #topic 3
+        if self.n_topics > 2:
+            labels = {i: round(self.graph.nodes[i]['opinions'][2], 2)for i in self.graph.nodes}
+
+        nx.draw(
+            self.graph, pos=self.layout, labels= labels or None,
+            node_color=[self.graph.nodes[i]['opinions'][0] for i in self.graph.nodes],
+            node_size= size or [300]*len(self.graph.nodes),
+            edge_color=[self.graph.edges[i, j]['weight'] for i, j in self.graph.edges],
+            edge_cmap=plt.cm.binary, edge_vmin=0, edge_vmax=1, alpha=0.7)
+        plt.title('Step: {}'.format(self.step))
+        plt.show()
+
+    def update(self):
+        
+        #update weight and opinion of random pair
+        #add edge with p=0.01
+        
+        if rd.random()> 0.01:
+            
+            edge= rd.choice(list(self.graph.edges))
+            wght = self.graph.edges[edge]['weight']
+            
+            o_a, o_b= [self.graph.nodes[n]['opinions'] for n in edge]
+            delta_o = (self.alpha * wght * (o_b - o_a))
+            
+            #update opinions weights according to the new rules
+            self.graph.nodes[edge[0]]['opinions'] += delta_o * (1 if not self.delta else (self.delta *
+                np.maximum(0.05, np.minimum(self.graph.nodes[edge[0]]['opinions'],
+                    np.absolute(self.graph.nodes[edge[0]]['opinions'] - 1))))) 
+            
+            self.graph.nodes[edge[1]]['opinions'] -= delta_o * (1 if not self.delta else (self.delta *
+                np.maximum(0.05, np.minimum(self.graph.nodes[edge[1]]['opinions'],
+                    np.absolute(self.graph.nodes[edge[1]]['opinions'] - 1))))) 
+            
+            #update edge weights 
+            delta_w= (self.beta * wght* (1-wght)*(1- self.gamma *np.mean(np.absolute(o_a-o_b))))
+            
+            self.graph.edges[edge]['weight']+= delta_w
+            
+            if self.delta:
+                self.graph.nodes[edge[0]]['opinions'] = np.clip(self.graph.nodes[edge[0]]['opinions'], 0, 1)
+                self.graph.nodes[edge[1]]['opinions'] = np.clip(self.graph.nodes[edge[1]]['opinions'], 0, 1)
+                self.graph.edges[edge]['weight'] = np.clip(self.graph.edges[edge]['weight'], 0, 1)
+                
+            # Remove very weak connections
+            if self.graph.edges[edge]['weight'] < 0.05:
+                self.graph.remove_edge(*edge)
+            
+        else:
+            #add new edge
+            for _ in range(50): # try a maximum of 50 times, otherways we skip adding a new edge
+                edge = rd.sample(list(self.graph.nodes), 2)
+                if edge not in self.graph.edges:
+                    self.graph.add_edge(edge[0], edge[1], weight=scipy.random.normal(.5, .2))
+                    break
+            
+        self.step += 1
+            
+            
+
+
+# ## Part 3: Local Analysis
+# 
+# In this section we analyze through vector fields how the variation of the values of the parameters affect the relationship between 2 people (network_size= 2). 
+
+# ### Multiple Opinions
+# 
+# For simplication of the problem, we will analyze the case with just two topics. 
+# 
+# Considering the weight updated rule:
+# 
+# Δw_ij = β w_ij (1- w_ij)(1- γ 1/t Σ|o_it -o_jt|)
+# 
+# Just as the basic model, a positive difference, represents a stronger bond, and a negative will decrease the bond between nodes/individuals. The parameter 1/γ determine the threshold in which the bond decrease or increase. This will behave very similar to the basic model, the only main difference is that the weight gets updated on the  mean of all topics. Therefore, if both topics have a disagreement of 0.5 or disagreement of 1 and the other 0, will behave exactly like the basic model. 
+# 
+
+# In[29]:
+
+
+from matplotlib import pyplot
+import itertools
+import scipy
+
+alpha = 0.01
+beta = .3
+gamma = 4
+
+cmap = pyplot.cm.viridis  # color map to use
+
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+fig = plt.figure(figsize=(18, 16), dpi= 80, facecolor='w', edgecolor='k')
+
+ax = fig.add_subplot(111, projection='3d')
+
+for o1 in [0.05, .25, .5, .75, .95]:
+    for o2 in [0.05, .25, .5, .75, .95]:
+        for weight in [0.05, .25, .5, .75, .95]:
+            ow = [[o1, 0.0, o2, 0.0, weight]]
+            for i in range(100):
+                delta_o1 = alpha * ow[-1][4] * (ow[-1][1] - ow[-1][0])
+                delta_o2 = alpha * ow[-1][4] * (ow[-1][3] - ow[-1][2])
+                
+                delta_w = (
+                    beta * ow[-1][4] * (1-ow[-1][4]) *
+                    (1-gamma*np.mean([abs(ow[-1][1] - ow[-1][0]),
+                                     abs(ow[-1][3] - ow[-1][2])])))
+                
+                new_weight = ow[-1][4] + delta_w
+                if new_weight < 0.05:
+                    new_weight = 0
+                ow.append([ow[-1][0] + delta_o1, ow[-1][1] - delta_o1, ow[-1][2] + delta_o2, ow[-1][3] - delta_o2, new_weight])
+                
+                
+            ax.plot(
+                [row[0] - row[1] for row in ow],
+                [row[2] - row[3] for row in ow],
+                [row[4] for row in ow],
+                color=(cmap(0.15) if ow[-1][4] == 0 else cmap(0.75)))
+            
+ax.set_xlabel('Topic1 Difference')
+ax.set_ylabel('Topic2 Difference')
+ax.set_zlabel('Edge Weight')
+
+pyplot.axis('square')
+pyplot.show()
+
+
+# We can observed from the last figure, that it looks pretty similar to the basic model. We can observe the shift in direction of weight change around 0.2 along the line where the mean of opinion deltas Δo_ij= 1/γ. We can see that if we are positioned in that line and the bond is not strong enough, the relationship disconnects. We can extend this behavior for a higher number of topics for the current assumptions. Then we can conclude that using the same parameters values as in the basic model is most appropiate.  
+
+# ### Personalized flexibility
+# 
+# In this model we modify the individuals opinions based on their distance from the extreme opinions based on the equation explained above. In this model, our δ parameter indicates the influence of this on the outcome of the simulation.  
+
+# In[30]:
+
+
+alpha = 0.03
+beta = 0.3
+gamma = 4
+
+delta = [1, 3, 7, 10]
+
+cmap = pyplot.cm.viridis
+
+for d in delta:
+
+    for opinion, weight in [
+        [0.25, 0.95], [0.45, 0.95], [0.55, 0.95], [0.65, 0.95], [0.75, 0.95],
+        [0.85, 0.95], [0.95, 0.95], [0.35, 0.65], [0.45, 0.75], [0.95, 0.75],
+        [0.95, 0.35], [0.3, 0.25], [0.3, 0.15], [0.15, 0.06], [0.05, 0.06]
+    ]:
+        ow = [[opinion, 0.0, weight]]
+        for i in range(150):
+            delta_o = alpha * ow[-1][2] * (ow[-1][1] - ow[-1][0])
+            delta_w = (
+                beta * ow[-1][2] * (1-ow[-1][2]) *
+                (1-gamma*abs(ow[-1][1] - ow[-1][0])))
+            new_weight = ow[-1][2] + delta_w
+            if new_weight < 0.05:
+                new_weight = 0
+
+            ow.append([ow[-1][0] + delta_o * max(.05, min([ow[-1][0], abs(ow[-1][0]-1)])) * d, 
+                       ow[-1][1] - delta_o * max(.05, min([ow[-1][1], abs(ow[-1][1]-1)])) * d, new_weight])
+        pyplot.plot(
+            [row[0] for row in ow],
+            [row[2] for row in ow],
+            color=(cmap(0.15) if ow[-1][2] == 0 else cmap(0.75)),
+            alpha=0.75)
+
+    pyplot.title('Delta:' + str(d))
+    pyplot.xlabel('Opinion of Individual 1')
+    pyplot.ylabel('Relationship weight')
+    pyplot.plot([0, 1], [0.05, 0.05], 'k--')
+    pyplot.axis('square')
+    pyplot.show()
+
+
+# As we can see, there are more extremes adjustments of an individual opinion in the middle area, increasing with higher delta values. With a value around 3, we will identify more disconnections in our relationships, given that nodes will be unable to adjust their relationships towards each other. If we increase this value to 10, we will see that the updates can increase up to 5 times its original value, and the extremes are half as large as previously. This can help us to predict what would happen with values around 20, in which we will observe a constant minimum update but with larger changes in the moderate area. Therefore, the new updated rule can slowly move the weights in either direction, and the behavior is robust against other parameters. We can choose a value of 4 as an appropiate value then.
+
+# ## Part 4: Simulation Analysis
+# 
+# ### Multiple Topics
+
+# In[31]:
+
+
+sim = NetworkSimulationExtension(n_size=60, m_nodes=4, alpha=.01, beta=.45, gamma=5.0, n_topics=5, delta=None)
+sim.initialize()
+plt.figure()
+sim.observe()
+for i in range(5):
+    for _ in range(6000):
+        sim.update()
+    plt.figure()
+    sim.observe()
+
+
+# In[32]:
+
+
+sim = NetworkSimulationExtension(n_size=60, m_nodes=4, alpha=.04, beta=.45, gamma=5.0, n_topics=5, delta=None)
+sim.initialize()
+plt.figure()
+sim.observe()
+for i in range(5):
+    for _ in range(6000):
+        sim.update()
+    plt.figure()
+    sim.observe()
+
+
+# With a low value of alpha, groups quickly form clusters, demonstranting a slow process of interactions. We can observe how after the formation of clusters, the groups start interacting, and the clusters start merging. This can be explained by the random adding edge that slowly increases the degrees faster than the interaction can decrease, forcing more extreme opinion to interact. We can identify the different topics depending on color, node size and node label. If we increase the value of alpha, opinions are updated faster. Even when clusters seems to be forming, they are quickly reconnected and opinions converge since the network does not disconnected completely before nodes start pulling up together. If we increase the value of beta, we will eventually split the network since this parameter updates the magnitude of the weight update. This basically means that disagreements will more quickly lead to disconnected bonds, since opinion cannot be updated as quickly. As we mentioned previously, gamma defines the threshold at which the relationship get stronger or weaker. With higher values of gamma, bonds are more likely to break. 
+# 
+# All these behaviors can be observed in the case of multiple topics. However, cluster as not as well defined since the mean opinion difference, that allows the system to be less likely to be extreme for more topics. This results in the weight update being the one related with an opinion difference, but quickly getting smaller as opinions converge. If we decrease alpha and increase beta, we can diverge the system in a long term sequence, after some time. However, by increasing the topics this combination does not behave very well at splitting, converging opinions. Therefore, having a wide range of topics reduces the likelihood of groups falling apart since it decreases the odds of disagreement. If we have high values of gamma, which means high agreement for the preserve of relationships, multiple topics can produce a split in the network since it makes harder to reach extreeme agreement values.
+# 
+
+# ### Personalized flexibility
+# We can now compare behavior at different values of delta. With low values of delta, individuals are more stubborn to change their extreme opinion, which leads to a more extreme opinion distribution in the network. On the other hand, with high values of delta, individuals in the gray zone are more prone to change and move, leading to an unstable network.
+# 
+# These observed behavior can be extended with different values of parameters, not adjusting the direction of influence.
+# 
+
+# In[20]:
+
+
+opinion_spreads = {}
+n = 30000
+for d in [None,1.0,3.0,5.0,10.0,15.0,20.0]:
+    sim = NetworkSimulationExtension(n_size=60, m_nodes=4, alpha=.03, beta=.3, gamma=5.0, n_topics=1, delta= d)
+    sim.initialize()
+    spread = []
+    for _ in range(int(n/1000)):
+        for _ in range(1000):
+            sim.update()
+        o_dist = [o[0] for i, o in nx.get_node_attributes(sim.graph, 'opinions').items()]
+        spread.append(np.mean((o_dist - np.mean(o_dist))**2))
+    opinion_spreads[l] = spread
+    sim.observe()
+    sns.distplot([o[0] for i, o in nx.get_node_attributes(sim.graph, 'opinions').items()], hist=False, rug=True)
+    plt.title(" {} steps - Delta={}".format(n, d or "None"))
+    plt.xlim((0,1))
+    plt.show()
+    
+
+
+# ### Implementation with the two modifications
+
+# In[34]:
+
+
+sim = NetworkSimulationExtension(n_size=60, m_nodes=4, alpha=.03, beta=.3, gamma=5, n_topics=2, delta=8)
+sim.initialize()
+plt.figure()
+sim.observe()
+for i in range(7):
+    for _ in range(5000):
+        sim.update()
+    plt.figure()
+    sim.observe()
+
+
+# ## Discussion
+# 
+# Even when this model present really interesting characteristics of social networks, it is still a very simplief version of the real world. A more detailed analysis should include different weights in some topics, the correlativity between the different topics, it could include concepts such as latitude of acceptance and rejection. Human relationships are very complex, there are still open questions about how individuals with a lot in common might still be separated, or groups that cluster together despite differences. This is the reason why there is no limits in the level of analysis and resolution of these models.  
